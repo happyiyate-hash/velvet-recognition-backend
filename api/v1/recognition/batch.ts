@@ -186,11 +186,12 @@ async function acrcloud(audio: Buffer, filename: string): Promise<ProviderResult
 function parseAudio(req: VercelRequest): Promise<{ buffer: Buffer; filename: string }> {
   return new Promise((resolve, reject) => {
     const form = formidable({ multiples: false, maxFileSize: MAX_AUDIO_BYTES, maxFiles: 1, allowEmptyFiles: false });
-    form.parse(req, async (error, _fields, files) => {
+    form.parse(req, async (error, fields, files) => {
       if (error) return reject(error);
       const value = files.audio;
       const file = Array.isArray(value) ? value[0] : value;
-      if (!file) return reject(new Error('Missing multipart field: audio'));
+      const fieldNames = Object.keys({ ...fields, ...files });
+      if (fieldNames.length !== 1 || !file) return reject(new Error('Request must contain exactly one multipart field named: audio'));
       if (file.size > MAX_AUDIO_BYTES) return reject(new Error('Audio file exceeds 5 MB'));
       try {
         const buffer = await fs.readFile(file.filepath);
@@ -204,11 +205,11 @@ function parseAudio(req: VercelRequest): Promise<{ buffer: Buffer; filename: str
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const id = requestId();
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('X-Velvet-Request-Id', id);
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' }, id);
+  if (req.method !== 'POST') return json(res, 405, { success: false, error: 'Method not allowed', requestId: id }, id);
 
   const trace: string[] = [`request:${id}`, 'received:batch'];
   try {
@@ -226,7 +227,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }, id);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid recognition request';
-    const status = /missing multipart|exceeds 5 MB|empty/i.test(message) ? 400 : 500;
+    const status = /missing multipart|exactly one multipart|exceeds 5 MB|empty/i.test(message) ? 400 : 500;
     trace.push(`request_error:${message}`);
     return json(res, status, {
       success: false,

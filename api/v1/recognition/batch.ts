@@ -30,6 +30,12 @@ type ProviderResult = {
   error: string | null;
 };
 
+type ParsedAudio = {
+  buffer: Buffer;
+  filename: string;
+  mimeType: string;
+};
+
 const requestId = () => `velvet_${Date.now().toString(36)}_${crypto.randomBytes(6).toString('hex')}`;
 
 function json(res: VercelResponse, status: number, body: unknown, id: string) {
@@ -71,6 +77,23 @@ function normalizeUrl(value: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+function normalizeMimeType(value: unknown, filename: string): string {
+  const mime = clean(value)?.toLowerCase();
+  if (mime && mime !== 'application/octet-stream') return mime;
+
+  const extension = filename.toLowerCase().split('.').pop();
+  const byExtension: Record<string, string> = {
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    ogg: 'audio/ogg',
+    oga: 'audio/ogg',
+    m4a: 'audio/mp4',
+    flac: 'audio/flac',
+    aac: 'audio/aac',
+  };
+  return byExtension[extension ?? ''] ?? 'application/octet-stream';
 }
 
 const providerError = (error: string): ProviderResult => ({ success: false, status: 'error', confidence: 0, song: null, error });
@@ -124,14 +147,14 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-async function audd(audio: Buffer, filename: string): Promise<ProviderResult> {
+async function audd(audio: Buffer, filename: string, mimeType: string): Promise<ProviderResult> {
   const token = process.env.AUDD_API_TOKEN;
   if (!token) return providerError('AUDD_API_TOKEN is not configured');
   try {
     const form = new FormData();
     form.append('api_token', token);
     form.append('return', 'apple_music,spotify');
-    form.append('file', new Blob([audio], { type: 'audio/wav' }), filename || 'audio.wav');
+    form.append('file', new Blob([audio], { type: mimeType }), filename || 'audio');
     const response = await withTimeout(fetch('https://api.audd.io/', { method: 'POST', body: form }), PROVIDER_TIMEOUT_MS);
     const data: any = await response.json().catch(() => null);
     if (!response.ok) return providerError(`AudD HTTP ${response.status}`);
@@ -147,7 +170,7 @@ function hmacSha1Base64(secret: string, message: string): string {
   return crypto.createHmac('sha1', secret).update(message).digest('base64');
 }
 
-async function acrcloud(audio: Buffer, filename: string): Promise<ProviderResult> {
+async function acrcloud(audio: Buffer, filename: string, mimeType: string): Promise<ProviderResult> {
   const host = process.env.ACRCLOUD_HOST;
   const accessKey = process.env.ACRCLOUD_ACCESS_KEY;
   const accessSecret = process.env.ACRCLOUD_ACCESS_SECRET;
@@ -166,7 +189,7 @@ async function acrcloud(audio: Buffer, filename: string): Promise<ProviderResult
     form.append('signature', signature);
     form.append('data_type', dataType);
     form.append('signature_version', signatureVersion);
-    form.append('sample', new Blob([audio], { type: 'audio/wav' }), filename || 'audio.wav');
+    form.append('sample', new Blob([audio], { type: mimeType }), filename || 'audio');
     const response = await withTimeout(fetch(`https://${host}/v1/identify`, { method: 'POST', body: form }), PROVIDER_TIMEOUT_MS);
     const data: any = await response.json().catch(() => null);
     if (!response.ok) return providerError(`ACRCloud HTTP ${response.status}`);
@@ -183,21 +206,43 @@ async function acrcloud(audio: Buffer, filename: string): Promise<ProviderResult
   }
 }
 
-function parseAudio(req: VercelRequest): Promise<{ buffer: Buffer; filename: string }> {
+function parseAudio(req: VercelRequest): Promise<ParsedAudio> {
   return new Promise((resolve, reject) => {
-    const form = formidable({ multiples: false, maxFileSize: MAX_AUDIO_BYTES, maxFiles: 1, allowEmptyFiles: false });
+    const form = formidable({
+      multiples: false,
+      maxFileSize: MAX_AUDIO_BYTES,
+      maxFiles: 1,
+      allowEmptyFiles: false,
+    });
+
     form.parse(req, async (error, fields, files) => {
-      if (error) return reject(error);
+      if (error) {
+        const message = error instanceof Error ? error.message : 'Unable to parse multipart request';
+        return reject(new Error(message));
+      }
+
       const value = files.audio;
       const file = Array.isArray(value) ? value[0] : value;
       const fieldNames = Object.keys({ ...fields, ...files });
-      if (fieldNames.length !== 1 || !file) return reject(new Error('Request must contain exactly one multipart field named: audio'));
-      if (file.size > MAX_AUDIO_BYTES) return reject(new Error('Audio file exceeds 5 MB'));
+
+      if (fieldNames.length !== 1 || !file) {
+        return reject(new Error('Request must contain exactly one multipart field named: audio'));
+      }
+
+      if (file.size > MAX_AUDIO_BYTES) {
+        return reject(new Error('Audio file exceeds 5 MB'));
+      }
+
       try {
         const buffer = await fs.readFile(file.filepath);
         if (!buffer.length) return reject(new Error('Audio file is empty'));
-        resolve({ buffer, filename: file.originalFilename ?? 'audio.wav' });
-      } catch (e) { reject(e); }
+
+        const filename = file.originalFilename ?? 'audio';
+        const mimeType = normalizeMimeType(file.mimetype, filename);
+        resolve({ buffer, filename, mimeType });
+      } catch (e) {
+        reject(e);
+      }
     });
   });
 }
@@ -208,17 +253,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('X-Velvet-Request-Id', id);
+
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return json(res, 405, { success: false, error: 'Method not allowed', requestId: id }, id);
+  if (req.method !== 'POST') {
+    return json(res, 405, { success: false, error: 'Method not allowed', requestId: id }, id);
+  }
 
   const trace: string[] = [`request:${id}`, 'received:batch'];
+
   try {
-    const { buffer, filename } = await parseAudio(req);
-    trace.push(`audio:${buffer.byteLength} bytes`);
-    const [auddResult, acrResult] = await Promise.all([audd(buffer, filename), acrcloud(buffer, filename)]);
+    const { buffer, filename, mimeType } = await parseAudio(req);
+    trace.push(`audio:${buffer.byteLength} bytes`, `mime:${mimeType}`, `filename:${filename}`);
+
+    const [auddResult, acrResult] = await Promise.all([
+      audd(buffer, filename, mimeType),
+      acrcloud(buffer, filename, mimeType),
+    ]);
+
     trace.push(`audd:${auddResult.status}`, `acrcloud:${acrResult.status}`);
     const success = auddResult.status === 'matched' || acrResult.status === 'matched';
     trace.push(`completed:${success ? 'matched' : 'no_match'}`);
+
     return json(res, 200, {
       success,
       requestId: id,
@@ -227,12 +282,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }, id);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid recognition request';
-    const status = /missing multipart|exactly one multipart|exceeds 5 MB|empty/i.test(message) ? 400 : 500;
+    const isPayloadTooLarge = /exceeds 5 MB|maxFileSize|larger than the configured limit|too large/i.test(message);
+    const isBadRequest = /missing multipart|exactly one multipart|empty|multipart/i.test(message);
+    const status = isPayloadTooLarge ? 413 : isBadRequest ? 400 : 500;
+
     trace.push(`request_error:${message}`);
     return json(res, status, {
       success: false,
       requestId: id,
-      results: { audd: providerError('Request was not processed'), acrcloud: providerError('Request was not processed') },
+      results: {
+        audd: providerError('Request was not processed'),
+        acrcloud: providerError('Request was not processed'),
+      },
       trace,
     }, id);
   }

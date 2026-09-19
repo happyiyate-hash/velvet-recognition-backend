@@ -442,7 +442,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const primary = auddResult.status === 'matched' ? auddResult : acrResult;
     const secondary = primary === auddResult ? acrResult : auddResult;
     const unified = unifiedSong(primary, secondary);
-    const song = unified ? await resolveArtwork(unified) : null;
+    // Keep recognition response on the critical path. Provider artwork is used when available;
+    // do not block the response on secondary artwork lookup services.
+    const song = unified;
 
     if (!song) {
       return json(res, 200, {

@@ -6,7 +6,6 @@
   "type": "module",
   "scripts": { "typecheck": "tsc --noEmit" },
   "dependencies": {
-    "@upstash/redis": "latest",
     "@vercel/node": "latest",
     "formidable": "latest"
   },

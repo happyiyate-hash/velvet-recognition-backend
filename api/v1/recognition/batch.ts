@@ -427,10 +427,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     trace.push(`completed:${success ? 'matched' : 'no_match'}`);
 
     if (!success) {
+      const providerErrors = [auddResult, acrResult]
+        .filter((result) => result.status === 'error' && result.error)
+        .map((result) => result.error as string);
       return json(res, 200, {
         success: false,
         requestId: id,
         song: null,
+        error: providerErrors.length ? providerErrors.join(' | ') : null,
+        trace,
       }, id);
     }
 

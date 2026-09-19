@@ -479,11 +479,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, status, {
       success: false,
       requestId: id,
-      results: {
-        audd: providerError('Request was not processed'),
-        acrcloud: providerError('Request was not processed'),
-      },
-      trace,
+      song: null,
+      error: message,
     }, id);
   }
 }

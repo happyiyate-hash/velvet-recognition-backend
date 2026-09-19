@@ -63,6 +63,7 @@ async function token(force = false): Promise<string> {
       const cached = await db.get<string>(TOKEN_KEY);
       if (cached) return cached;
     }
+    throw new Error('SoundCloud token refresh is busy; please retry');
   }
 
   try {

@@ -1,16 +1,8 @@
 {
   "rewrites": [
-    {
-      "source": "/health",
-      "destination": "/api/health"
-    },
-    {
-      "source": "/v1/recognition/test",
-      "destination": "/api/v1/recognition/test"
-    },
-    {
-      "source": "/v1/recognition/batch",
-      "destination": "/api/v1/recognition/batch"
-    }
+    { "source": "/health", "destination": "/api/health" },
+    { "source": "/v1/recognition/test", "destination": "/api/v1/recognition/test" },
+    { "source": "/v1/recognition/batch", "destination": "/api/v1/recognition/batch" },
+    { "source": "/v1/playback/resolve", "destination": "/api/v1/playback/resolve" }
   ]
 }

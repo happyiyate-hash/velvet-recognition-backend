@@ -98,11 +98,11 @@ function normalizeUrl(value: unknown): string | null {
 
 function normalizeText(value: unknown): string {
   return (clean(value) ?? '').normalize('NFKD')
-    .replace(/[\\u0300-\\u036f]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/&/g, 'and')
     .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\\s+/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -119,8 +119,8 @@ function highResArtwork(url: unknown): string | null {
   const value = normalizeUrl(url);
   if (!value) return null;
   return value
-    .replace(/\\b\\d{2,4}x\\d{2,4}(?:bb)?\\b/gi, '1000x1000bb')
-    .replace(/\\b\\d{2,4}x\\d{2,4}\\b/gi, '1000x1000');
+    .replace(/\b\d{2,4}x\d{2,4}(?:bb)?\b/gi, '1000x1000bb')
+    .replace(/\b\d{2,4}x\d{2,4}\b/gi, '1000x1000');
 }
 
 function normalizeArtworkCandidate(value: unknown): string | null {

@@ -1,47 +1,68 @@
 # Velvet Recognition Backend
 
-Serverless recognition backend for Velvet Music. The Android app uploads one audio clip to the backend; the backend sends the same clip to AudD and ACRCloud in parallel and returns both provider results.
+Serverless recognition and playback backend for Velvet Music, deployed on Vercel.
 
-## Endpoint
+## Endpoints
 
-`POST /v1/recognition/batch`
+- `POST /v1/recognition/batch` — identifies recorded/background music through AudD and ACRCloud.
+- `POST /v1/recognition/test` — backend test endpoint.
+- `POST /v1/playback/resolve` — resolves a recognized song to a currently playable SoundCloud stream without exposing SoundCloud credentials to Android.
 
-Request: `multipart/form-data` with exactly one file field named `audio`.
+### Playback request
 
-Maximum audio size: 5 MB.
+JSON body:
 
-The response includes:
+```json
+{
+  "artist": "Artist Name",
+  "title": "Song Title",
+  "isrc": "optional",
+  "durationMs": 210000
+}
+```
 
-- `requestId`
-- `results.audd`
-- `results.acrcloud`
-- provider status: `matched`, `no_match`, or `error`
-- confidence
-- normalized song metadata
-- provider links when available
-- `trace`
-
-The Android app remains responsible for comparing the two matched results and deciding which metadata to present. The top-level `song` field is retained only for compatibility with older clients.
+The backend searches SoundCloud for a playable track, verifies the artist/title and optional ISRC/duration, then asks SoundCloud for a stream URL. Temporary stream URLs are returned to the Android player and are not persisted.
 
 ## Environment variables
 
-Configure these in Vercel Project Settings → Environment Variables. Do not commit real values to GitHub.
+Configure these in Vercel Project Settings → Environment Variables. Never commit real values.
+
+### Recognition
 
 - `AUDD_API_TOKEN`
 - `ACRCLOUD_HOST`
 - `ACRCLOUD_ACCESS_KEY`
 - `ACRCLOUD_ACCESS_SECRET`
 
-For ACRCloud, use the host assigned to the Velvet project. The example file contains the current host discussed for this project.
+### SoundCloud
+
+- `SOUNDCLOUD_CLIENT_ID`
+- `SOUNDCLOUD_CLIENT_SECRET`
+
+SoundCloud credentials remain server-side.
+
+### Shared token cache
+
+This Vercel backend uses Upstash Redis through the Vercel Marketplace for the SoundCloud client-credentials token.
+
+- `KV_REST_API_URL`
+- `KV_REST_API_TOKEN`
+
+The SoundCloud access token is cached for 3300 seconds. A short Redis lock prevents concurrent Vercel instances from refreshing the same token at the same time. No SoundCloud token is placed in the Android app.
+
+Vercel's current storage path is Marketplace Redis/Upstash; the old Vercel KV product is no longer used.
 
 ## Deploy
 
-Import this GitHub repository into Vercel. Vercel will install dependencies and deploy the function under `api/v1/recognition/batch.ts`.
+Import this GitHub repository into Vercel. Vercel will install dependencies and deploy the functions under `api/`.
 
-The `vercel.json` rewrite keeps the public API contract at `/v1/recognition/batch`.
+The `vercel.json` rewrites preserve the public API paths:
 
-After deployment, test:
+- `/health`
+- `/v1/recognition/test`
+- `/v1/recognition/batch`
+- `/v1/playback/resolve`
 
-`POST https://YOUR-VERCEL-DOMAIN/v1/recognition/batch`
+After connecting the project to Vercel, add the environment variables above and connect Upstash Redis from the Vercel Marketplace so `KV_REST_API_URL` and `KV_REST_API_TOKEN` are injected.
 
-Do not put AudD or ACRCloud credentials in the Android application.
+Do not put AudD, ACRCloud, SoundCloud, or Redis credentials in the Android application.

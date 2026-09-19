@@ -4,10 +4,10 @@ Serverless song-recognition backend for Velvet Music, deployed on Vercel.
 
 ## Endpoints
 
-- `POST /v1/recognition/batch` — identifies recorded/background music through AudD and ACRCloud.
+- `POST /v1/recognition/batch` — receives recognition audio, queries AudD and ACRCloud in parallel, merges the metadata into one unified song object, and returns that object to the app.
 - `POST /v1/recognition/test` — backend test endpoint.
 
-The backend receives recognition audio, sends it to the configured recognition providers, and returns the recognition result to the Android app. It does not resolve playback sources, stream music, use SoundCloud, or access Redis/storage for playback.
+The backend receives recognition audio, sends it to the configured recognition providers, merges their metadata into one stable JSON response, and returns that response to the Android app. If artwork is missing, the backend tries Spotify oEmbed, iTunes Search, Deezer, then MusicBrainz/Cover Art Archive. The app does not need to choose a provider. The backend does not resolve playback sources, stream music, use SoundCloud, or access Redis/storage for playback.
 
 ## Environment variables
 

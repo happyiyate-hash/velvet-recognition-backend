@@ -8,6 +8,23 @@ const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
 const PROVIDER_TIMEOUT_MS = 15_000;
 type Status = 'matched' | 'no_match' | 'error';
 
+type UnifiedSong = {
+  id: string | null;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  artworkUrl: string | null;
+  artworkSource: string | null;
+  durationMs: number | null;
+  isrc: string | null;
+  confidence: number;
+  provider: string | null;
+  spotifyUrl: string | null;
+  appleMusicUrl: string | null;
+  youtubeMusicUrl: string | null;
+  audiomackUrl: string | null;
+};
+
 type Song = {
   id: string | null;
   title: string | null;
@@ -77,6 +94,141 @@ function normalizeUrl(value: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+function normalizeText(value: unknown): string {
+  return (clean(value) ?? '').normalize('NFKD')
+    .replace(/[\\u0300-\\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\\s+/g, ' ')
+    .trim();
+}
+
+function sameSong(artistA: unknown, titleA: unknown, artistB: unknown, titleB: unknown): boolean {
+  const a = normalizeText(artistA), b = normalizeText(artistB);
+  const c = normalizeText(titleA), d = normalizeText(titleB);
+  if (!a || !b || !c || !d) return false;
+  const artistMatch = a === b || a.includes(b) || b.includes(a);
+  const titleMatch = c === d || c.includes(d) || d.includes(c);
+  return artistMatch && titleMatch;
+}
+
+function highResArtwork(url: unknown): string | null {
+  const value = normalizeUrl(url);
+  if (!value) return null;
+  return value
+    .replace(/\\b\\d{2,4}x\\d{2,4}(?:bb)?\\b/gi, '1000x1000bb')
+    .replace(/\\b\\d{2,4}x\\d{2,4}\\b/gi, '1000x1000');
+}
+
+function normalizeArtworkCandidate(value: unknown): string | null {
+  return highResArtwork(value);
+}
+
+function unifiedSong(primary: ProviderResult, secondary: ProviderResult): UnifiedSong | null {
+  const first = primary.song;
+  const second = secondary.song;
+  if (!first && !second) return null;
+
+  const base = first ?? second!;
+  const other = first ? second : null;
+  const artwork = firstString(base.artworkUrl, other?.artworkUrl);
+  const spotifyUrl = firstString(base.spotifyUrl, other?.spotifyUrl);
+  const appleMusicUrl = firstString(base.appleMusicUrl, other?.appleMusicUrl);
+  const youtubeMusicUrl = firstString(base.youtubeMusicUrl, other?.youtubeMusicUrl);
+  const audiomackUrl = firstString(base.audiomackUrl, other?.audiomackUrl);
+
+  return {
+    id: firstString(base.id, other?.id),
+    title: firstString(base.title, other?.title),
+    artist: firstString(base.artist, other?.artist),
+    album: firstString(base.album, other?.album),
+    artworkUrl: normalizeArtworkCandidate(artwork),
+    artworkSource: artwork ? 'recognition' : null,
+    durationMs: numberOrNull(base.durationMs) ?? numberOrNull(other?.durationMs),
+    isrc: firstString(base.isrc, other?.isrc),
+    confidence: Math.max(primary.confidence, secondary.confidence),
+    provider: primary.song ? 'audd' : 'acrcloud',
+    spotifyUrl,
+    appleMusicUrl,
+    youtubeMusicUrl,
+    audiomackUrl,
+  };
+}
+
+async function artworkFromSpotify(url: string | null): Promise<string | null> {
+  if (!url) return null;
+  try {
+    const endpoint = `https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`;
+    const response = await withTimeout(fetch(endpoint, { headers: { Accept: 'application/json' } }), 5000);
+    if (!response.ok) return null;
+    const data: any = await response.json().catch(() => null);
+    return normalizeArtworkCandidate(data?.thumbnail_url);
+  } catch { return null; }
+}
+
+async function artworkFromITunes(artist: string | null, title: string | null): Promise<string | null> {
+  if (!artist || !title) return null;
+  try {
+    const endpoint = `https://itunes.apple.com/search?term=${encodeURIComponent(`${artist} ${title}`)}&entity=song&limit=5`;
+    const response = await withTimeout(fetch(endpoint, { headers: { Accept: 'application/json' } }), 5000);
+    if (!response.ok) return null;
+    const data: any = await response.json().catch(() => null);
+    const results = Array.isArray(data?.results) ? data.results : [];
+    const exact = results.find((item: any) => sameSong(item?.artistName, item?.trackName, artist, title));
+    return normalizeArtworkCandidate(exact?.artworkUrl100);
+  } catch { return null; }
+}
+
+async function artworkFromDeezer(artist: string | null, title: string | null): Promise<string | null> {
+  if (!artist || !title) return null;
+  try {
+    const endpoint = `https://api.deezer.com/search?q=${encodeURIComponent(`artist:"${artist}" track:"${title}"`)}&limit=5`;
+    const response = await withTimeout(fetch(endpoint, { headers: { Accept: 'application/json' } }), 5000);
+    if (!response.ok) return null;
+    const data: any = await response.json().catch(() => null);
+    const results = Array.isArray(data?.data) ? data.data : [];
+    const exact = results.find((item: any) => sameSong(item?.artist?.name, item?.title, artist, title));
+    return normalizeArtworkCandidate(exact?.album?.cover_xl ?? exact?.album?.cover_big ?? exact?.album?.cover_medium);
+  } catch { return null; }
+}
+
+async function artworkFromMusicBrainz(artist: string | null, title: string | null): Promise<string | null> {
+  if (!artist || !title) return null;
+  try {
+    const query = `artist:"${artist.replace(/([\\\\"])/g, '\\\\$1')}" AND releasegroup:"${title.replace(/([\\\\"])/g, '\\\\$1')}"`;
+    const endpoint = `https://musicbrainz.org/ws/2/release-group/?query=${encodeURIComponent(query)}&fmt=json&limit=3`;
+    const response = await withTimeout(fetch(endpoint, {
+      headers: { Accept: 'application/json', 'User-Agent': 'VelvetMusic/1.0 (music-recognition backend)' },
+    }), 5000);
+    if (!response.ok) return null;
+    const data: any = await response.json().catch(() => null);
+    const groups = Array.isArray(data?.['release-groups']) ? data['release-groups'] : [];
+    const exact = groups.find((item: any) => sameSong(item?.['artist-credit']?.[0]?.name ?? item?.['artist-credit']?.[0]?.artist?.name, item?.title, artist, title));
+    const mbid = clean(exact?.id);
+    if (!mbid) return null;
+    const cover = `https://coverartarchive.org/release-group/${encodeURIComponent(mbid)}/front-1200`;
+    const coverResponse = await withTimeout(fetch(cover, { method: 'HEAD' }), 5000);
+    return coverResponse.ok || coverResponse.status === 307 ? cover : null;
+  } catch { return null; }
+}
+
+async function resolveArtwork(song: UnifiedSong): Promise<UnifiedSong> {
+  if (song.artworkUrl) return song;
+
+  const [spotify, itunes, deezer] = await Promise.all([
+    artworkFromSpotify(song.spotifyUrl),
+    artworkFromITunes(song.artist, song.title),
+    artworkFromDeezer(song.artist, song.title),
+  ]);
+
+  const fallback = spotify ?? itunes ?? deezer;
+  if (fallback) return { ...song, artworkUrl: fallback, artworkSource: spotify ? 'spotify_oembed' : itunes ? 'itunes' : 'deezer' };
+
+  const musicBrainz = await artworkFromMusicBrainz(song.artist, song.title);
+  return musicBrainz ? { ...song, artworkUrl: musicBrainz, artworkSource: 'musicbrainz_cover_art_archive' } : song;
 }
 
 function normalizeMimeType(value: unknown, filename: string): string {
@@ -274,11 +426,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const success = auddResult.status === 'matched' || acrResult.status === 'matched';
     trace.push(`completed:${success ? 'matched' : 'no_match'}`);
 
+    if (!success) {
+      return json(res, 200, {
+        success: false,
+        requestId: id,
+        song: null,
+      }, id);
+    }
+
+    const primary = auddResult.status === 'matched' ? auddResult : acrResult;
+    const secondary = primary === auddResult ? acrResult : auddResult;
+    const unified = unifiedSong(primary, secondary);
+    const song = unified ? await resolveArtwork(unified) : null;
+
+    if (!song) {
+      return json(res, 200, {
+        success: false,
+        requestId: id,
+        song: null,
+      }, id);
+    }
+
     return json(res, 200, {
-      success,
+      success: true,
       requestId: id,
-      results: { audd: auddResult, acrcloud: acrResult },
-      trace,
+      song: {
+        id: song.id,
+        title: song.title,
+        artist: song.artist,
+        album: song.album,
+        artworkUrl: song.artworkUrl,
+        artworkSource: song.artworkSource,
+        durationMs: song.durationMs,
+        isrc: song.isrc,
+        confidence: song.confidence,
+        provider: song.provider,
+        platforms: {
+          spotifyUrl: song.spotifyUrl,
+          appleMusicUrl: song.appleMusicUrl,
+          youtubeMusicUrl: song.youtubeMusicUrl,
+          audiomackUrl: song.audiomackUrl,
+        },
+      },
     }, id);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid recognition request';

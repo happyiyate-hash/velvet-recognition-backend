@@ -1,0 +1,1 @@
+import type {MediaExtractResult} from "../types"; export async function extractYouTube(url:string):Promise<MediaExtractResult>{return{success:false,platform:"youtube",error:"Extractor not implemented yet",extractor:"youtube"};}

@@ -10,7 +10,7 @@
   "dependencies": {
     "@vercel/node": "latest",
     "formidable": "latest",
-    "@distube/ytdl-core": "latest"
+    "youtubei.js": "^18.1.0"
   },
   "devDependencies": {
     "typescript": "latest"

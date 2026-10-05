@@ -31,3 +31,4 @@ The `vercel.json` rewrites preserve the public API paths:
 - `/health`
 - `/v1/recognition/test`
 - `/v1/recognition/batch`
+- https://velvet-recognition-backend.vercel.app/v1/media/extract

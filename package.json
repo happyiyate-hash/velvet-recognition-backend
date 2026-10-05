@@ -4,11 +4,18 @@
   "private": true,
   "description": "Velvet Music serverless song-recognition backend for AudD and ACRCloud.",
   "type": "module",
-  "scripts": { "typecheck": "tsc --noEmit" },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@vercel/node": "latest",
-    "formidable": "latest"
+    "formidable": "latest",
+    "@distube/ytdl-core": "latest"
   },
-  "devDependencies": { "typescript": "latest" },
-  "engines": { "node": ">=20" }
+  "devDependencies": {
+    "typescript": "latest"
+  },
+  "engines": {
+    "node": ">=20"
+  }
 }

@@ -1,0 +1,1 @@
+import type {MediaExtractResult} from "../types"; export async function extractWithCobalt(url:string):Promise<MediaExtractResult|null>{return null;}

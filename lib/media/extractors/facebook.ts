@@ -1,0 +1,1 @@
+import type {MediaExtractResult} from "../types"; export async function extractFacebook(url:string):Promise<MediaExtractResult>{return{success:false,platform:"facebook",error:"Extractor not implemented yet",extractor:"facebook"};}

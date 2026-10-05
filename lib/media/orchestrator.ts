@@ -1,11 +1,12 @@
 import { detectMediaPlatform } from "./detector";
 import { normalizeMediaResult, failureResult } from "./response";
 import type { MediaExtractRequest, MediaExtractResult, MediaPlatform } from "./types";
+import { extractYouTube } from "./extractors/youtube";
 
 type PlatformExtractor = (url: string) => Promise<MediaExtractResult>;
 
 const extractors: Partial<Record<MediaPlatform, PlatformExtractor>> = {
-  youtube: (await import("./extractors/youtube")).extractYouTube
+  youtube: extractYouTube
 };
 
 export async function orchestrateMediaExtraction(

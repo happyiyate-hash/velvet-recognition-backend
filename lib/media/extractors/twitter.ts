@@ -1,0 +1,1 @@
+import type {MediaExtractResult} from "../types"; export async function extractTwitter(url:string):Promise<MediaExtractResult>{return{success:false,platform:"twitter",error:"Extractor not implemented yet",extractor:"twitter"};}

@@ -1,0 +1,1 @@
+import type {MediaExtractResult} from "../types"; export async function extractReddit(url:string):Promise<MediaExtractResult>{return{success:false,platform:"reddit",error:"Extractor not implemented yet",extractor:"reddit"};}

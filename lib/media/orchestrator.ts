@@ -1,9 +1,42 @@
-import {detectMediaPlatform} from "./detector";
-import {normalizeMediaResult} from "./response";
-import type {MediaExtractRequest,MediaExtractResult} from "./types";
-import {extractYouTube} from "./extractors/youtube"; import {extractTikTok} from "./extractors/tiktok"; import {extractInstagram} from "./extractors/instagram"; import {extractFacebook} from "./extractors/facebook"; import {extractTwitter} from "./extractors/twitter"; import {extractReddit} from "./extractors/reddit"; import {extractPinterest} from "./extractors/pinterest"; import {extractLinkedIn} from "./extractors/linkedin"; import {extractGeneric} from "./extractors/generic";
-export async function orchestrateMediaExtraction(request:MediaExtractRequest):Promise<MediaExtractResult>{
- const platform=detectMediaPlatform(request.url);
- const extractors={youtube:extractYouTube,tiktok:extractTikTok,instagram:extractInstagram,facebook:extractFacebook,twitter:extractTwitter,reddit:extractReddit,pinterest:extractPinterest,linkedin:extractLinkedIn,generic:extractGeneric,unknown:extractGeneric};
- return normalizeMediaResult(await extractors[platform](request.url));
+import { detectMediaPlatform } from "./detector";
+import { normalizeMediaResult, failureResult } from "./response";
+import type { MediaExtractRequest, MediaExtractResult, MediaPlatform } from "./types";
+
+type PlatformExtractor = (url: string) => Promise<MediaExtractResult>;
+
+const extractors: Partial<Record<MediaPlatform, PlatformExtractor>> = {
+  // Platform extractors are intentionally wired here first.
+  // Their implementations will be added one platform at a time.
+};
+
+export async function orchestrateMediaExtraction(
+  request: MediaExtractRequest
+): Promise<MediaExtractResult> {
+  const url = request.url?.trim();
+
+  if (!url) return failureResult("unknown", "A media URL is required.");
+
+  const detection = detectMediaPlatform(url);
+
+  if (detection.platform === "unknown") {
+    return failureResult("unknown", "Invalid URL. Only HTTP(S) media URLs are supported.");
+  }
+
+  const extractor = extractors[detection.platform];
+
+  if (!extractor) {
+    return failureResult(
+      detection.platform,
+      `Platform detected as ${detection.platform}, but its extractor is not implemented yet.`
+    );
+  }
+
+  try {
+    return normalizeMediaResult(await extractor(url));
+  } catch (error) {
+    return failureResult(
+      detection.platform,
+      error instanceof Error ? error.message : "Media extraction failed."
+    );
+  }
 }
